@@ -1,0 +1,31 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local secrets & credentials – NEVER commit these
+.env
+*.env
+client_secret*.json
+google-ads.yaml
+secrets/
+
+# Deployment scripts
+deploy/*
+
+# Deployment examples
+!deploy/deploy.sh.example
+
+# Internal notes
+*.internal.*
+*.local.*
+
+# Scratch / temp
+temp/
+notebooks/

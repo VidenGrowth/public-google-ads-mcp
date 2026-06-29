@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Example Cloud Run deploy for the Google Ads MCP server (remote, multi-tenant).
+# Copy to deploy/deploy.sh and adjust the variables for your project.
+#
+# Each user signs in with their own Google account; the server forwards their
+# token to the Google Ads API. The server holds only the developer token and the
+# OAuth client_id/secret – no per-user credentials, no email allowlist.
+#
+# Prerequisites:
+#   - `gcloud auth login` done
+#   - project enabled for Cloud Run + Secret Manager + the Google Ads API
+#   - a runtime service account with roles/secretmanager.secretAccessor on the
+#     two secrets created below
+#   - a Google Ads developer token
+#   - an OAuth 2.0 *Web* client created in this project. Add ONE authorized
+#     redirect URI:  <RESOURCE_SERVER_URL>/auth/callback
+#     (with the URL pattern below that is:
+#      https://${SERVICE_NAME}-${PROJECT_NUMBER}.${SERVICE_REGION}.run.app/auth/callback)
+#   - on the OAuth consent screen, add the scopes:
+#       openid, .../auth/userinfo.email, .../auth/adwords
+#     `adwords` is a sensitive scope: in Testing mode it works for up to 100
+#     listed test users without verification; publishing requires Google review.
+#
+# One-time setup – create and populate the two secrets:
+#
+#   printf '%s' "<DEVELOPER_TOKEN>" | gcloud secrets create GOOGLE_ADS_DEVELOPER_TOKEN \
+#     --replication-policy=automatic --data-file=- --project=<PROJECT_ID>
+#   printf '%s' "<OAUTH_CLIENT_SECRET>" | gcloud secrets create GOOGLE_OAUTH_CLIENT_SECRET \
+#     --replication-policy=automatic --data-file=- --project=<PROJECT_ID>
+#   # grant the runtime SA secretAccessor on each (repeat per secret):
+#   gcloud secrets add-iam-policy-binding GOOGLE_ADS_DEVELOPER_TOKEN \
+#     --member=serviceAccount:<SA_EMAIL> --role=roles/secretmanager.secretAccessor \
+#     --project=<PROJECT_ID>
+#   gcloud secrets add-iam-policy-binding GOOGLE_OAUTH_CLIENT_SECRET \
+#     --member=serviceAccount:<SA_EMAIL> --role=roles/secretmanager.secretAccessor \
+#     --project=<PROJECT_ID>
+
+set -euo pipefail
+
+SERVICE_NAME=google-ads-mcp
+SERVICE_REGION=europe-west4
+PROJECT_ID="<YOUR_PROJECT_ID>"
+PROJECT_NUMBER=$(gcloud projects describe ${PROJECT_ID} --format="value(projectNumber)")
+SERVICE_ACCOUNT="<YOUR_SERVICE_ACCOUNT>@${PROJECT_ID}.iam.gserviceaccount.com"
+GOOGLE_OAUTH_CLIENT_ID="<YOUR_GOOGLE_OAUTH_CLIENT_ID>"
+MCP_HTTP_PATH=/
+LOG_LEVEL=INFO
+
+# Cloud Run URL is deterministic, so we can set RESOURCE_SERVER_URL up front.
+URL="https://${SERVICE_NAME}-${PROJECT_NUMBER}.${SERVICE_REGION}.run.app"
+ENV_VARS="^##^MCP_TRANSPORT=http##MCP_HTTP_PATH=${MCP_HTTP_PATH}##GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}##RESOURCE_SERVER_URL=${URL}##LOG_LEVEL=${LOG_LEVEL}"
+
+echo "Deploying to ${URL}"
+echo "Remember: the OAuth client's redirect URI must be ${URL}/auth/callback"
+
+gcloud run deploy "${SERVICE_NAME}" \
+  --project="${PROJECT_ID}" \
+  --region="${SERVICE_REGION}" \
+  --source=. \
+  --allow-unauthenticated \
+  --service-account="${SERVICE_ACCOUNT}" \
+  --min=0 \
+  --max=3 \
+  --concurrency=20 \
+  --timeout=600 \
+  --memory=768Mi \
+  --cpu=0.5 \
+  --set-env-vars="${ENV_VARS}" \
+  --set-secrets="GOOGLE_ADS_DEVELOPER_TOKEN=GOOGLE_ADS_DEVELOPER_TOKEN:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest"
+
+echo ""
+echo "Post-deploy checks:"
+echo "  curl -s ${URL}/.well-known/oauth-protected-resource | jq"
+echo "  curl -si -X POST ${URL}/ -H 'Content-Type: application/json' \\"
+echo "    -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"curl\",\"version\":\"1\"}}}'"
+echo "  (expect 401 with a WWW-Authenticate: Bearer header)"
+echo ""
+echo "Logs:"
+echo "  gcloud run services logs read ${SERVICE_NAME} --region=${SERVICE_REGION} --project=${PROJECT_ID} --limit=100"
+
+# Note: --allow-unauthenticated lets requests reach the container; the MCP
+# per-user Google OAuth layer is what actually gates tool access.
