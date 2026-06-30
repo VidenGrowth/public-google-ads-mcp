@@ -6,10 +6,10 @@
 Client (Claude.ai / Desktop / Copilot / IDE)
        │
        │  stdio (local)    OR    http (remote, Cloud Run)
-       ▼                          │ + Bearer token (FastMCP OAuth proxy → Google)
+       ▼                          │ + Bearer token (client obtains it from Google directly)
                                   ▼
-                            auth.py (GoogleProvider – per-user Google OAuth)
-                                  │  validates the user's Google token (adwords scope)
+                            auth.py (RemoteAuthProvider – OAuth resource server)
+                                  │  verifies the user's Google token (aud + adwords scope)
                                   ▼
   server.py ──► app.py ──► register_tools()
                   │
@@ -35,7 +35,7 @@ google-ads-mcp/
 ├── src/google_ads_mcp/          # Application source
 │   ├── server.py                # Entry point – switches stdio/http by MCP_TRANSPORT
 │   ├── app.py                   # FastMCP factory – create_mcp(auth=…)
-│   ├── auth.py                  # GoogleProvider factory (per-user Google OAuth, remote HTTP)
+│   ├── auth.py                  # RemoteAuthProvider factory (OAuth resource server, remote HTTP)
 │   ├── observability.py         # setup_logging() + log_tool_call decorator
 │   ├── google_ads/              # API client layer
 │   │   ├── client.py            # require_client(), search_rows(); per-user token or env creds
@@ -176,12 +176,12 @@ campaign_id	campaign_name	clicks	cost	ctr
 - `<meta>`: compact JSON. An `applied` object carries the resolved `date_range`,
   active `filters`, and `row_count`; tool-specific fields (`summary`, `query`,
   `truncated`, ...) sit at the top level next to `applied`.
-- `<data>`: TSV grid — first line is the header, then one tab-joined row per line.
+- `<data>`: TSV grid – first line is the header, then one tab-joined row per line.
   Empty result sets omit the block.
 - Multi-table tools emit one `<table name="...">` block per section (e.g.
   `<table name="age">`, `<table name="gender">`) instead of a single `<data>`.
 - Cells with tabs/newlines are sanitized to spaces; lists are joined with `|`.
-- Errors come back as `<error>{"error":"..."}</error>` — no `<meta>`/`<data>`.
+- Errors come back as `<error>{"error":"..."}</error>` – no `<meta>`/`<data>`.
 
 ## Configuration
 
@@ -208,15 +208,15 @@ only `GOOGLE_ADS_DEVELOPER_TOKEN`. No refresh token is stored server-side.
 | `GOOGLE_ADS_CONFIGURATION_FILE_PATH` | No | Alternative: path to a google-ads.yaml |
 
 #### Remote transport & auth (Cloud Run)
-The `http` transport is always authenticated with per-user Google OAuth.
+The `http` transport is a pure OAuth resource server: it verifies each request's
+Google token and forwards it to the Ads API. It holds no OAuth client secret.
 
 | Variable | Description |
 |----------|-------------|
 | `MCP_TRANSPORT` | `stdio` (default) \| `http` |
 | `HOST`, `PORT` | Listen interface/port for HTTP transport |
 | `MCP_HTTP_PATH` | MCP mount path (default `/mcp/`; `/` is friendliest for Claude.ai) |
-| `GOOGLE_OAUTH_CLIENT_ID` | Google Web OAuth client ID |
-| `GOOGLE_OAUTH_CLIENT_SECRET` | Google Web OAuth client secret (from Secret Manager) |
-| `RESOURCE_SERVER_URL` | Public service URL (OAuth redirect base + advertised metadata) |
+| `GOOGLE_OAUTH_CLIENT_ID` | Google Web OAuth client ID; checked against each token's `aud` claim |
+| `RESOURCE_SERVER_URL` | Public service URL (advertised in protected-resource metadata) |
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | API developer token (from Secret Manager) |
 | `LOG_LEVEL` | `INFO` (default) – controls the observability logger |

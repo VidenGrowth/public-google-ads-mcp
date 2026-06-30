@@ -16,7 +16,7 @@ authenticated credentials can reach.
 |---|---|---|
 | **Who it's for** | An individual on their own machine | A team sharing one hosted instance |
 | **Auth to Google Ads** | Your own refresh-token credentials | Each user signs in with **their own** Google account; their token is forwarded to the Ads API, so they only see accounts they personally can access |
-| **The server holds** | Your full credentials | Only the developer token + the OAuth client |
+| **The server holds** | Your full credentials | Only the developer token (no OAuth secret) |
 | **Clients** | Claude Desktop, VS Code/Copilot, any stdio MCP client | Claude.ai web connector, Claude Desktop/Code |
 | **Setup** | This README, below | [docs/REMOTE_DEPLOY.md](docs/REMOTE_DEPLOY.md) |
 
@@ -138,7 +138,7 @@ documented in [docs/TOOLS_DESIGN.md](docs/TOOLS_DESIGN.md).
 ## Remote deploy
 
 To host shared instance where each teammate signs in with their own Google account – no per-user install, and everyone only sees the Ads accounts they can access – deploy the HTTP transport with Google OAuth.
-The server authenticates users via an OAuth proxy (one-click connect from Claude.ai, no pasted secrets) and forwards each user's token to the Ads API.
+The server is a pure OAuth Resource Server: the MCP client signs the user in with Google, and the server verifies each request's token and forwards it to the Ads API. It holds only the developer token – no OAuth client secret.
 
 Full guide: **[docs/REMOTE_DEPLOY.md](docs/REMOTE_DEPLOY.md)**.
 
@@ -148,11 +148,13 @@ Full guide: **[docs/REMOTE_DEPLOY.md](docs/REMOTE_DEPLOY.md)**.
 
 - **Local (stdio):** the server uses *your* refresh-token credentials. There is
   no MCP-layer auth – the server runs on your machine under your control.
-- **Remote (HTTP):** the server uses FastMCP's Google OAuth proxy. Each request
-  carries a per-user Google token (with the `adwords` scope) that is forwarded to
-  the Google Ads API, so authorization is whatever that user's Google account can
-  do. The server stores **no** user credentials – only the operator's developer
-  token and the OAuth client_id/secret.
+- **Remote (HTTP):** the server is an OAuth 2.0 Resource Server (RFC 9728). The
+  MCP client obtains a Google token directly (Google's own OAuth flow), and the
+  server verifies each request's token – checking the `aud` claim and the
+  `adwords` scope – then forwards it to the Google Ads API. Authorization is
+  whatever that user's Google account can do. The server runs no OAuth flow and
+  stores **no** secret beyond the operator's developer token; the OAuth client
+  secret lives in the connector config, not on the server.
 
 ---
 
