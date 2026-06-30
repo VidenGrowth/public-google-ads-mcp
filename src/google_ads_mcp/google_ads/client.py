@@ -89,11 +89,11 @@ _last_user_client: tuple[str, Any] | None = None
 def _oauth_user_token() -> str | None:
     """Return the forwarded Google OAuth access token for the current request.
 
-    Only meaningful under the remote HTTP transport: FastMCP's GoogleProvider
-    validates the user's token on each request and
-    exposes it (with the ``adwords`` scope) via ``get_access_token()``. Returns
-    ``None`` outside a request context (e.g. local stdio), so callers fall back
-    to the configured credentials.
+    Only meaningful under the remote HTTP transport: the resource server's
+    token verifier validates the user's token on each request and exposes it
+    (with the ``adwords`` scope) via ``get_access_token()``. Returns ``None``
+    outside a request context (e.g. local stdio), so callers fall back to the
+    configured credentials.
     """
     try:
         from fastmcp.server.dependencies import get_access_token

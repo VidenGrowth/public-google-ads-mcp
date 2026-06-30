@@ -36,9 +36,9 @@ def setup_logging() -> None:
 def _caller_email() -> str | None:
     """Return the authenticated caller's email (remote HTTP mode) or None.
 
-    Under the OAuth proxy the verified Google identity is attached to the
-    request's access token claims. Returns None on the local stdio transport,
-    where there is no auth context.
+    Under the HTTP transport the token verifier attaches the verified Google
+    identity to the request's access token claims. Returns None on the local
+    stdio transport, where there is no auth context.
     """
     try:
         from fastmcp.server.dependencies import get_access_token
