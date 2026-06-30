@@ -2,36 +2,36 @@
 # Example Cloud Run deploy for the Google Ads MCP server (remote, multi-tenant).
 # Copy to deploy/deploy.sh and adjust the variables for your project.
 #
-# Each user signs in with their own Google account; the server forwards their
-# token to the Google Ads API. The server holds only the developer token and the
-# OAuth client_id/secret – no per-user credentials, no email allowlist.
+# The server is a pure OAuth Resource Server: each user signs in with their own
+# Google account, and the server verifies the request's token and forwards it to
+# the Google Ads API. The server holds ONLY the developer token – no OAuth client
+# secret, no per-user credentials, no email allowlist. The MCP client (e.g.
+# Claude) runs the OAuth flow directly against Google, so the OAuth client secret
+# lives in the connector config, not here.
 #
 # Prerequisites:
 #   - `gcloud auth login` done
 #   - project enabled for Cloud Run + Secret Manager + the Google Ads API
 #   - a runtime service account with roles/secretmanager.secretAccessor on the
-#     two secrets created below
+#     developer-token secret created below
 #   - a Google Ads developer token
-#   - an OAuth 2.0 *Web* client created in this project. Add ONE authorized
-#     redirect URI:  <RESOURCE_SERVER_URL>/auth/callback
-#     (with the URL pattern below that is:
-#      https://${SERVICE_NAME}-${PROJECT_NUMBER}.${SERVICE_REGION}.run.app/auth/callback)
+#   - an OAuth 2.0 *Web* client created in this project. Its authorized redirect
+#     URIs are the MCP CLIENTS' callbacks (NOT a URL on this server):
+#       https://claude.ai/api/mcp/auth_callback
+#       https://claude.com/api/mcp/auth_callback
+#       http://localhost:3334/oauth/callback   + http://127.0.0.1:3334/oauth/callback   (Claude Desktop / mcp-remote)
+#       http://localhost:3118/callback         + http://127.0.0.1:3118/callback         (Claude Code CLI, --callback-port 3118)
 #   - on the OAuth consent screen, add the scopes:
 #       openid, .../auth/userinfo.email, .../auth/adwords
 #     `adwords` is a sensitive scope: in Testing mode it works for up to 100
 #     listed test users without verification; publishing requires Google review.
 #
-# One-time setup – create and populate the two secrets:
+# One-time setup – create and populate the developer-token secret:
 #
 #   printf '%s' "<DEVELOPER_TOKEN>" | gcloud secrets create GOOGLE_ADS_DEVELOPER_TOKEN \
 #     --replication-policy=automatic --data-file=- --project=<PROJECT_ID>
-#   printf '%s' "<OAUTH_CLIENT_SECRET>" | gcloud secrets create GOOGLE_OAUTH_CLIENT_SECRET \
-#     --replication-policy=automatic --data-file=- --project=<PROJECT_ID>
-#   # grant the runtime SA secretAccessor on each (repeat per secret):
+#   # grant the runtime SA secretAccessor:
 #   gcloud secrets add-iam-policy-binding GOOGLE_ADS_DEVELOPER_TOKEN \
-#     --member=serviceAccount:<SA_EMAIL> --role=roles/secretmanager.secretAccessor \
-#     --project=<PROJECT_ID>
-#   gcloud secrets add-iam-policy-binding GOOGLE_OAUTH_CLIENT_SECRET \
 #     --member=serviceAccount:<SA_EMAIL> --role=roles/secretmanager.secretAccessor \
 #     --project=<PROJECT_ID>
 
@@ -51,7 +51,8 @@ URL="https://${SERVICE_NAME}-${PROJECT_NUMBER}.${SERVICE_REGION}.run.app"
 ENV_VARS="^##^MCP_TRANSPORT=http##MCP_HTTP_PATH=${MCP_HTTP_PATH}##GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}##RESOURCE_SERVER_URL=${URL}##LOG_LEVEL=${LOG_LEVEL}"
 
 echo "Deploying to ${URL}"
-echo "Remember: the OAuth client's redirect URI must be ${URL}/auth/callback"
+echo "Remember: register the MCP clients' callbacks (e.g. https://claude.ai/api/mcp/auth_callback)"
+echo "as redirect URIs on the OAuth client – NOT a URL on this server."
 
 gcloud run deploy "${SERVICE_NAME}" \
   --project="${PROJECT_ID}" \
@@ -66,11 +67,12 @@ gcloud run deploy "${SERVICE_NAME}" \
   --memory=768Mi \
   --cpu=0.5 \
   --set-env-vars="${ENV_VARS}" \
-  --set-secrets="GOOGLE_ADS_DEVELOPER_TOKEN=GOOGLE_ADS_DEVELOPER_TOKEN:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest"
+  --set-secrets="GOOGLE_ADS_DEVELOPER_TOKEN=GOOGLE_ADS_DEVELOPER_TOKEN:latest"
 
 echo ""
 echo "Post-deploy checks:"
 echo "  curl -s ${URL}/.well-known/oauth-protected-resource | jq"
+echo "    (authorization_servers -> https://accounts.google.com; scopes_supported -> .../auth/adwords)"
 echo "  curl -si -X POST ${URL}/ -H 'Content-Type: application/json' \\"
 echo "    -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"curl\",\"version\":\"1\"}}}'"
 echo "  (expect 401 with a WWW-Authenticate: Bearer header)"
