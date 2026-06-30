@@ -58,4 +58,5 @@ def build_auth():
         client_secret=client_secret,
         base_url=base_url,
         required_scopes=GOOGLE_SCOPES,
+        require_authorization_consent="remember",
     )
